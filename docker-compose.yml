@@ -1,0 +1,49 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Reach the Ollama service inside the compose network.
+      OLLAMA_HOST: http://ollama:11434
+    depends_on:
+      - ollama
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:5173"
+    environment:
+      BACKEND_URL: http://backend:8000
+    depends_on:
+      - backend
+
+  # Local open-source model serving (the free inference path).
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+
+  # --- Full version (add when scaling background runs) ---
+  # Runs happen in-process today, so Redis and the Celery worker are not started
+  # (an idle Redis container helps nothing). Uncomment both together when moving
+  # background runs and scheduling off the single process.
+  #
+  # redis:
+  #   image: redis:7-alpine
+  #   ports: ["6379:6379"]
+  #
+  # worker:
+  #   build: ./backend
+  #   command: celery -A app.tasks.run_tasks worker --loglevel=info
+  #   env_file: [.env]
+  #   depends_on: [redis]
+
+volumes:
+  ollama_models:

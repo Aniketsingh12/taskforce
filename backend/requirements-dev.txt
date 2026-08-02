@@ -1,0 +1,10 @@
+# Test dependencies (not needed to run the app).
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   python -m pytest -q
+#
+# pytest-asyncio is required by pytest.ini's `asyncio_mode = auto`, which lets
+# the async client tests run without a per-test decorator.
+-r requirements.txt
+
+pytest==8.3.3
+pytest-asyncio==0.24.0
