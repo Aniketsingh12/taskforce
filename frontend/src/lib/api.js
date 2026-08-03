@@ -14,6 +14,7 @@ async function req(path, opts = {}) {
 export const api = {
   listWorkflows: () => req("/workflows"),
   getWorkflow: (id) => req(`/workflows/${id}`),
+  workflowGraph: (id) => req(`/workflows/${id}/graph`),
   createWorkflow: (wf) => req("/workflows", { method: "POST", body: JSON.stringify(wf) }),
   updateWorkflow: (id, wf) => req(`/workflows/${id}`, { method: "PUT", body: JSON.stringify(wf) }),
   deleteWorkflow: (id) => req(`/workflows/${id}`, { method: "DELETE" }),

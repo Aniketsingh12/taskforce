@@ -19,19 +19,51 @@ class ToolSpec:
                      output sinks record the actual deliverable (save_file).
     """
 
-    def __init__(self, name: str, description: str, fn: ToolFn, stage: str = "pre") -> None:
+    def __init__(
+        self,
+        name: str,
+        description: str,
+        fn: ToolFn,
+        stage: str = "pre",
+        parameters: dict | None = None,
+    ) -> None:
         self.name = name
         self.description = description
         self.fn = fn
         self.stage = stage
+        # JSON Schema for the arguments, sent to the model so it can call this
+        # tool itself. Defaults to a single free-text `query`.
+        self.parameters = parameters or {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "Input for the tool."}},
+            "required": ["query"],
+        }
 
     def meta(self) -> dict:
         return {"name": self.name, "description": self.description, "stage": self.stage}
 
+    def to_schema(self) -> dict:
+        """OpenAI-style function schema (also accepted by Ollama)."""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
 
 TOOL_REGISTRY: dict[str, ToolSpec] = {
     "web_search": ToolSpec(
-        "web_search", "Search the web for current information.", web_search, stage="pre"
+        "web_search", "Search the web for current information.", web_search, stage="pre",
+        parameters={
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "The search query."},
+            },
+            "required": ["query"],
+        },
     ),
     # Post-stage: previously this ran before the model and saved the run INPUT,
     # so the deliverable file never contained the agent's actual output.

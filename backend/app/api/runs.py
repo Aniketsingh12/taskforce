@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 
-from fastapi import APIRouter, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from ..db.schema import Run
@@ -65,8 +65,13 @@ async def trigger_run(req: TriggerRequest) -> TriggerResponse:
 
 
 @router.get("", response_model=list[Run])
-def list_runs(workflow_id: str | None = None) -> list[Run]:
-    return store.list_runs(workflow_id)
+def list_runs(
+    workflow_id: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+) -> list[Run]:
+    """Most recent runs first. Paginated so history stays bounded as runs pile up."""
+    return store.list_runs(workflow_id, limit=limit, offset=offset)
 
 
 @router.get("/{run_id}", response_model=Run)

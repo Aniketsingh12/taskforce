@@ -72,6 +72,7 @@ class ModelRouter:
         *,
         result: StreamResult | None = None,
         fallback: str | None = None,
+        tools: list[dict] | None = None,
         allow_fallback: bool = True,
     ) -> AsyncIterator[str]:
         """Stream a chat completion, transparently falling back on failure.
@@ -85,17 +86,28 @@ class ModelRouter:
         when absent the global chain in `fallback.py` applies.
         """
         # --- Primary attempt ---
+        emitted = False  # did the caller already receive part of this response?
         primary = self._client(provider)
         try:
-            async for chunk in primary.stream_chat(model, messages):
+            # Only offer tools to clients that implement tool calling — and pass
+            # the argument only when there are tools, so simpler clients can keep
+            # the two-parameter stream_chat signature.
+            kwargs = {"tools": tools} if (tools and primary.supports_tools) else {}
+            async for chunk in primary.stream_chat(model, messages, **kwargs):
+                emitted = True
                 yield chunk
             # Success: hand the client's usage back through the caller's result.
             if result is not None:
                 result.usage = primary.last_usage
                 result.model = f"{provider}:{model}"
+                result.tool_calls = primary.last_tool_calls
             return
         except Exception:  # noqa: BLE001 - any failure should fall back
-            if not allow_fallback:
+            # Falling back mid-stream would splice a partial primary response
+            # onto a complete fallback one, producing garbled output. Once any
+            # text has been emitted the only honest move is to surface the
+            # error and let the caller retry the attempt from scratch.
+            if emitted or not allow_fallback:
                 raise
             fb_provider, fb_model = self._resolve(provider, fallback)
             if fb_provider == provider and fb_model == model:
@@ -103,10 +115,12 @@ class ModelRouter:
 
         # --- Fallback path (e.g. Ollama down → mock, or OpenRouter → mock) ---
         backup = self._client(fb_provider)
-        async for chunk in backup.stream_chat(fb_model, messages):
+        fb_kwargs = {"tools": tools} if (tools and backup.supports_tools) else {}
+        async for chunk in backup.stream_chat(fb_model, messages, **fb_kwargs):
             yield chunk
         if result is not None:
             result.usage = backup.last_usage
+            result.tool_calls = backup.last_tool_calls
             # The "(fallback)" suffix is visible in the run trace so it's obvious
             # the requested model wasn't the one that ran.
             result.model = f"{fb_provider}:{fb_model} (fallback)"

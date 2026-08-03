@@ -12,11 +12,12 @@ from typing import AsyncIterator
 import httpx
 
 from ..core.config import settings
-from .base import ChatMessage, ModelClient, Usage, estimate_tokens
+from .base import ChatMessage, ModelClient, ToolCall, Usage, estimate_tokens, to_ollama_wire
 
 
 class OllamaClient(ModelClient):
     provider = "ollama"
+    supports_tools = True  # /api/chat accepts `tools` on tool-capable models
 
     def __init__(self, host: str | None = None, transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__()
@@ -24,15 +25,21 @@ class OllamaClient(ModelClient):
         self._transport = transport  # injectable for tests (mock upstream)
 
     async def stream_chat(
-        self, model: str, messages: list[ChatMessage]
+        self,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[str]:
         # Ollama's chat API mirrors OpenAI's message shape but streams NDJSON
         # (one JSON object per line) rather than SSE.
         payload = {
             "model": model or settings.ollama_default_model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [to_ollama_wire(m) for m in messages],
             "stream": True,
         }
+        if tools:
+            payload["tools"] = tools
+        self.last_tool_calls = []
         prompt_tokens = completion_tokens = 0
         emitted = ""
 
@@ -46,10 +53,20 @@ class OllamaClient(ModelClient):
                     if not line.strip():
                         continue
                     data = json.loads(line)
-                    chunk = data.get("message", {}).get("content", "")
+                    message = data.get("message", {})
+                    chunk = message.get("content", "")
                     if chunk:
                         emitted += chunk
                         yield chunk
+                    # Ollama returns complete tool calls (arguments already an
+                    # object), unlike OpenAI's fragmented deltas.
+                    for i, call in enumerate(message.get("tool_calls") or []):
+                        fn = call.get("function", {})
+                        self.last_tool_calls.append(ToolCall(
+                            id=call.get("id") or f"call_{i}",
+                            name=fn.get("name", ""),
+                            arguments=fn.get("arguments") or {},
+                        ))
                     # The final line has done=true plus token counts.
                     if data.get("done"):
                         prompt_tokens = data.get("prompt_eval_count", 0)

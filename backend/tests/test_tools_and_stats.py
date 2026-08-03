@@ -37,15 +37,15 @@ def test_save_file_writes_agent_output_not_run_input():
     assert "save_file" in run.traces[0].tools_called
 
 
-def test_web_search_still_runs_before_the_model():
-    """Pre-stage tools keep feeding the prompt as context."""
+def test_staged_mode_injects_pre_tool_output_as_context():
+    """tool_mode="staged" keeps the legacy fixed schedule: run tool, then model."""
     assert get_tool("web_search").stage == "pre"
     assert get_tool("save_file").stage == "post"
 
     wf = WorkflowConfig(
         id="test-pre-tool",
         name="Pre Tool Test",
-        agents=[AgentConfig(role="Researcher", order=0,
+        agents=[AgentConfig(role="Researcher", order=0, tool_mode="staged",
                             instructions="Research it.", tools=["web_search"])],
     )
     run = _run(wf, "multi-agent systems")
@@ -53,6 +53,28 @@ def test_web_search_still_runs_before_the_model():
     assert "web_search" in trace.tools_called
     # Pre-tool output is injected into the prompt the model saw.
     assert "Tool results" in trace.input
+
+
+def test_auto_mode_lets_the_model_call_the_tool_itself():
+    """tool_mode="auto" (the default) runs the ReAct loop.
+
+    Nothing is pre-injected; the model asks for the tool, sees the result, and
+    only then writes its answer.
+    """
+    wf = WorkflowConfig(
+        id="test-react",
+        name="ReAct Test",
+        agents=[AgentConfig(role="Researcher", order=0,
+                            instructions="Research it.", tools=["web_search"])],
+    )
+    run = _run(wf, "multi-agent systems")
+    trace = run.traces[0]
+
+    # The model chose the tool — it wasn't scheduled for it.
+    assert "web_search" in trace.tools_called
+    assert "Tool results" not in trace.input
+    # Usage is summed across both turns of the exchange, not just the last.
+    assert trace.prompt_tokens > 0 and trace.completion_tokens > 0
 
 
 def test_skipped_agents_are_excluded_from_the_local_api_split():

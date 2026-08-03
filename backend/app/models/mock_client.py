@@ -11,7 +11,18 @@ import asyncio
 import re
 from typing import AsyncIterator
 
-from .base import ChatMessage, ModelClient, Usage, estimate_cost, estimate_tokens
+from .base import ChatMessage, ModelClient, ToolCall, Usage, estimate_cost, estimate_tokens
+
+
+def _extract_goal(user: str) -> str:
+    """Pull the workflow goal out of the built prompt.
+
+    Echoing a raw slice of the prompt would drag the markdown scaffolding into
+    the agent's output — and, once handed off, corrupt the next agent's role
+    detection.
+    """
+    match = re.search(r"# Workflow goal / input\s*\n(.+?)(?:\n\s*\n|\Z)", user, re.S)
+    return (match.group(1) if match else user[:120]).strip()
 
 
 def _canned_response(messages: list[ChatMessage]) -> str:
@@ -21,13 +32,15 @@ def _canned_response(messages: list[ChatMessage]) -> str:
     # The handoff builder writes "Acting as the <Role>," into the user message,
     # which is a far more reliable signal than keyword-matching instructions
     # (a Writer's instructions legitimately mention the "researcher").
-    acting = re.search(r"Acting as the ([A-Za-z /]+?),", user)
-    role_hint = (acting.group(1) if acting else system).lower()
+    # Take the LAST match: earlier agents' output is quoted above in the
+    # handoff, so the first match may belong to a previous agent.
+    acting = re.findall(r"Acting as the ([A-Za-z /:]+?),", user)
+    role_hint = (acting[-1] if acting else system).lower()
 
     if "research" in role_hint:
         return (
             "Here are the key findings from my research:\n"
-            f"- The topic relates to: {user[:120].strip()}\n"
+            f"- The topic relates to: {_extract_goal(user)}\n"
             "- Source A: industry reports show steady growth.\n"
             "- Source B: practitioners highlight three recurring themes.\n"
             "- Source C: notable counter-argument worth addressing.\n"
@@ -108,10 +121,39 @@ def _canned_response(messages: list[ChatMessage]) -> str:
 
 class MockClient(ModelClient):
     provider = "mock"
+    supports_tools = True  # simulated, so the ReAct loop is demoable offline
 
     async def stream_chat(
-        self, model: str, messages: list[ChatMessage]
+        self,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[str]:
+        self.last_tool_calls = []
+
+        # Simulate a model choosing to call a tool: on the first turn (before
+        # any tool result is in the conversation), request the first offered
+        # tool with a query drawn from the prompt. The next turn sees the result
+        # and produces the final answer — a real two-step ReAct exchange.
+        already_used = any(m.role == "tool" for m in messages)
+        if tools and not already_used:
+            spec = tools[0].get("function", {})
+            user = next((m.content for m in reversed(messages) if m.role == "user"), "")
+            self.last_tool_calls = [
+                ToolCall(id="call_mock_1", name=spec.get("name", ""),
+                         arguments={"query": _extract_goal(user) or "the topic"})
+            ]
+            preamble = f"Let me use {spec.get('name', 'a tool')} first."
+            for word in preamble.split(" "):
+                await asyncio.sleep(0.01)
+                yield word + " "
+            self.last_usage = Usage(
+                prompt_tokens=sum(estimate_tokens(m.content) for m in messages),
+                completion_tokens=estimate_tokens(preamble),
+                cost_usd=0.0,
+            )
+            return
+
         text = _canned_response(messages)
         words = text.split(" ")
         emitted = ""

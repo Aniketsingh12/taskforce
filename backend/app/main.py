@@ -30,6 +30,11 @@ async def lifespan(_app: FastAPI):
     # before editing — user workflows have their own ids and are never touched.
     for wf in default_templates():
         store.save_workflow(wf)
+    # Runs are persisted as "running" the moment they start, so anything still
+    # in that state at boot was killed mid-flight by a crash, restart, or a
+    # reload. Close them out instead of leaving them running forever.
+    if (recovered := store.reconcile_interrupted_runs()):
+        print(f"[startup] marked {recovered} interrupted run(s) as failed")
     if settings.scheduler_enabled:
         scheduler.start()
     yield

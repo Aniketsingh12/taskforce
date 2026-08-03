@@ -26,6 +26,7 @@ def _now() -> datetime:
 
 OutputFormat = Literal["text", "json", "markdown"]
 TriggerType = Literal["manual", "schedule", "webhook"]
+ToolMode = Literal["auto", "staged"]
 
 
 class RunStatus(str, Enum):
@@ -49,11 +50,29 @@ class AgentConfig(BaseModel):
     fallback_model: str | None = None
     tools: list[str] = Field(default_factory=list)
     output_format: OutputFormat = "markdown"
+    # Reliability: extra attempts after the first, and a wall-clock cap per
+    # attempt so one hung model can't stall the whole run. None = no limit.
+    max_retries: int = 1
+    timeout_seconds: float | None = 300.0
+    # "auto"   — the model decides which tools to call and when (ReAct loop)
+    # "staged" — tools run on a fixed pre/post schedule (no tool-calling model)
+    tool_mode: ToolMode = "auto"
+    max_tool_steps: int = 4  # bound on the ReAct loop
+    # Canvas coordinates for the visual builder (ignored by execution).
+    position_x: float | None = None
+    position_y: float | None = None
     order: int = 0
     parallel_group: int | None = None       # agents sharing a group run together
     # Optional run condition: this agent runs only if the phrase appears in any
     # prior agent's output (prefix with "!" to invert). Empty = always run.
     condition: str | None = None
+
+
+class GraphEdge(BaseModel):
+    """A dependency between two agents in the visual builder."""
+
+    source: str  # agent id that must finish first
+    target: str  # agent id that consumes its output
 
 
 class WorkflowConfig(BaseModel):
@@ -65,6 +84,10 @@ class WorkflowConfig(BaseModel):
     cost_cap: float | None = None
     is_template: bool = False                # seeded, cloneable starting points
     agents: list[AgentConfig] = Field(default_factory=list)
+    # Visual-builder wiring. When present, `order`/`parallel_group` are derived
+    # from this graph on save (see orchestration/graph.py); when empty the
+    # agents' own order is authoritative.
+    edges: list[GraphEdge] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_now)
 
 
@@ -75,6 +98,10 @@ class Trace(BaseModel):
     agent_role: str
     input: str = ""
     output: str = ""
+    # Populated for agents with output_format="json": the parsed value, or the
+    # reason parsing failed (the raw text always stays in `output`).
+    output_json: object | None = None
+    parse_error: str | None = None
     tools_called: list[str] = Field(default_factory=list)
     model_used: str = ""
     prompt_tokens: int = 0

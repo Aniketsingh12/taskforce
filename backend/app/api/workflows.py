@@ -9,8 +9,21 @@ from fastapi import APIRouter, HTTPException, Response
 
 from ..db.schema import WorkflowConfig
 from ..db.store import store
+from ..orchestration.graph import compile_graph, derive_edges
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+
+
+def _apply_graph(workflow: WorkflowConfig) -> None:
+    """Derive execution order from the visual graph, if one was supplied.
+
+    Keeps a single source of truth: the canvas defines what runs when, and the
+    engine's stage model is computed from it rather than maintained by hand.
+    """
+    try:
+        compile_graph(workflow.agents, workflow.edges)
+    except ValueError as exc:  # a cycle — reject rather than run something wrong
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("", response_model=list[WorkflowConfig])
@@ -37,7 +50,26 @@ def create_workflow(workflow: WorkflowConfig) -> WorkflowConfig:
     """
     workflow.id = uuid4().hex
     workflow.is_template = False  # templates are seeded, not client-created
+    _apply_graph(workflow)
     return store.save_workflow(workflow)
+
+
+@router.get("/{workflow_id}/graph")
+def workflow_graph(workflow_id: str) -> dict:
+    """Nodes + edges for the visual builder.
+
+    Workflows built as a list have no stored edges, so a chain is inferred from
+    their stages — they open on the canvas already wired.
+    """
+    wf = store.get_workflow(workflow_id)
+    if wf is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    edges = wf.edges or derive_edges(wf.agents)
+    return {
+        "agents": [a.model_dump(mode="json") for a in wf.agents],
+        "edges": [e.model_dump() for e in edges],
+        "inferred": not wf.edges,
+    }
 
 
 @router.post("/{workflow_id}/clone", response_model=WorkflowConfig, status_code=201)
@@ -61,6 +93,7 @@ def update_workflow(workflow_id: str, workflow: WorkflowConfig) -> WorkflowConfi
     if store.get_workflow(workflow_id) is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
     workflow.id = workflow_id
+    _apply_graph(workflow)
     return store.save_workflow(workflow)
 
 

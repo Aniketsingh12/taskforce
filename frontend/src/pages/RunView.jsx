@@ -20,6 +20,7 @@ export default function RunView() {
   const [statuses, setStatuses] = useState({});   // id → queued|running|done|skipped
   const [outputs, setOutputs] = useState({});     // id → accumulated streamed text
   const [traces, setTraces] = useState({});       // id → finished Trace object
+  const [toolCalls, setToolCalls] = useState({}); // id → [{tool, arguments}] the model chose
   const [activeId, setActiveId] = useState(null); // currently streaming agent
   const [finalRun, setFinalRun] = useState(null); // the completed Run
   const wsRef = useRef(null);                      // hold the socket to close on unmount
@@ -46,6 +47,7 @@ export default function RunView() {
     setStatuses({});
     setOutputs({});
     setTraces({});
+    setToolCalls({});
     setFinalRun(null);
     setActiveId(null);
 
@@ -79,6 +81,21 @@ export default function RunView() {
           case "agent_skipped":
             // A conditional agent whose condition wasn't met.
             setStatuses((s) => ({ ...s, [ev.agent_id]: "skipped" }));
+            break;
+          case "tool_call":
+            // The model chose to call a tool. Kept as its own state rather than
+            // spliced into the output text, which gets replaced by the
+            // authoritative trace once the agent finishes.
+            setToolCalls((tc) => ({
+              ...tc,
+              [ev.agent_id]: [...(tc[ev.agent_id] || []), { tool: ev.tool, arguments: ev.arguments }],
+            }));
+            break;
+          case "agent_retry":
+            // The attempt failed/timed out and is restarting from scratch —
+            // drop the partial text so it doesn't prepend the real answer.
+            setOutputs((o) => ({ ...o, [ev.agent_id]: "" }));
+            setStatuses((s) => ({ ...s, [ev.agent_id]: "retrying" }));
             break;
           case "run_completed":
             // Capture the final deliverable and stop.
@@ -154,7 +171,8 @@ export default function RunView() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-400">
           Live output
         </h2>
-        <LiveTrace agents={displayAgents} outputs={outputs} traces={traces} activeId={activeId} />
+        <LiveTrace agents={displayAgents} outputs={outputs} traces={traces}
+                   toolCalls={toolCalls} activeId={activeId} />
       </div>
 
       {/* The final deliverable, shown once the run completes. */}

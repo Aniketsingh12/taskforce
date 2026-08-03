@@ -3,14 +3,58 @@
 from __future__ import annotations
 
 import abc
+import json
 from dataclasses import dataclass, field
 from typing import AsyncIterator
 
 
 @dataclass
+class ToolCall:
+    """A tool invocation the model asked for."""
+
+    id: str
+    name: str
+    arguments: dict
+
+
+@dataclass
 class ChatMessage:
-    role: str  # "system" | "user" | "assistant"
+    role: str  # "system" | "user" | "assistant" | "tool"
     content: str
+    tool_calls: list[ToolCall] = field(default_factory=list)  # assistant turns
+    tool_call_id: str | None = None                           # tool results
+    name: str | None = None                                   # tool result's tool
+
+
+def to_openai_wire(m: ChatMessage) -> dict:
+    """Serialise a message for an OpenAI-compatible API (OpenRouter)."""
+    if m.role == "tool":
+        return {"role": "tool", "tool_call_id": m.tool_call_id or "", "content": m.content}
+    msg: dict = {"role": m.role, "content": m.content}
+    if m.tool_calls:
+        # OpenAI takes arguments as a JSON *string*, not an object.
+        msg["tool_calls"] = [
+            {"id": c.id, "type": "function",
+             "function": {"name": c.name, "arguments": json.dumps(c.arguments)}}
+            for c in m.tool_calls
+        ]
+    return msg
+
+
+def to_ollama_wire(m: ChatMessage) -> dict:
+    """Serialise a message for Ollama's /api/chat.
+
+    Same shape as OpenAI except tool-call arguments stay objects and tool
+    results carry the tool's name rather than a call id.
+    """
+    if m.role == "tool":
+        return {"role": "tool", "content": m.content, "name": m.name or ""}
+    msg: dict = {"role": m.role, "content": m.content}
+    if m.tool_calls:
+        msg["tool_calls"] = [
+            {"function": {"name": c.name, "arguments": c.arguments}} for c in m.tool_calls
+        ]
+    return msg
 
 
 @dataclass
@@ -35,6 +79,11 @@ class StreamResult:
 
     usage: Usage = field(default_factory=Usage)
     model: str = ""
+    # Tools the model asked to run this turn. Empty means it produced a final
+    # answer and the ReAct loop can stop.
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    # Names of tools actually executed across the whole loop, for the trace.
+    tools_called: list[str] = field(default_factory=list)
 
 
 # Rough per-1M-token prices (USD) for cost estimation in traces.
@@ -70,13 +119,21 @@ class ModelClient(abc.ABC):
     """
 
     provider: str = "base"
+    # Clients that can do model-driven tool calling set this; the ReAct loop
+    # falls back to staged tools for those that can't.
+    supports_tools: bool = False
 
     def __init__(self) -> None:
         self.last_usage: Usage = Usage()
+        # Populated when the model requests tools (see ToolCall).
+        self.last_tool_calls: list[ToolCall] = []
 
     @abc.abstractmethod
     async def stream_chat(
-        self, model: str, messages: list[ChatMessage]
+        self,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[str]:  # pragma: no cover - interface
         ...
         yield ""  # pragma: no cover

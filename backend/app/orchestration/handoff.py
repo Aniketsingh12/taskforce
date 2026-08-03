@@ -7,6 +7,8 @@ which is what makes runs debuggable.
 
 from __future__ import annotations
 
+import json
+
 from ..db.schema import AgentConfig, Trace
 
 
@@ -34,7 +36,13 @@ def build_agent_input(
     if completed:
         parts.append("# Work completed by previous agents")
         for t in completed:
-            parts.append(f"## {t.agent_role}\n{t.output.strip()}")
+            # When an agent produced structured output, hand the *parsed* value
+            # forward as clean JSON rather than whatever prose wrapped it.
+            if t.output_json is not None:
+                body = json.dumps(t.output_json, indent=2)
+            else:
+                body = t.output.strip()
+            parts.append(f"## {t.agent_role}\n{body}")
 
     # Surface any tool results the agent fetched before reasoning.
     if tool_context:

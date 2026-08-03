@@ -8,6 +8,7 @@
 const STATUS_STYLES = {
   queued: "border-edge text-gray-400",
   running: "border-accent text-white agent-active",
+  retrying: "border-amber-500 text-amber-200 agent-active",
   done: "border-emerald-500 text-emerald-200",
   failed: "border-red-500 text-red-200",
   skipped: "border-edge text-gray-600 opacity-50 line-through",

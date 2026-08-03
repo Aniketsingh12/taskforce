@@ -14,11 +14,15 @@ from typing import AsyncIterator
 import httpx
 
 from ..core.config import settings
-from .base import ChatMessage, ModelClient, Usage, estimate_cost, estimate_tokens
+from .base import (
+    ChatMessage, ModelClient, ToolCall, Usage,
+    estimate_cost, estimate_tokens, to_openai_wire,
+)
 
 
 class OpenRouterClient(ModelClient):
     provider = "openrouter"
+    supports_tools = True  # OpenAI-compatible function calling
 
     def __init__(self, api_key: str | None = None, transport: httpx.AsyncBaseTransport | None = None) -> None:
         super().__init__()
@@ -27,7 +31,10 @@ class OpenRouterClient(ModelClient):
         self._transport = transport  # injectable for tests (mock upstream)
 
     async def stream_chat(
-        self, model: str, messages: list[ChatMessage]
+        self,
+        model: str,
+        messages: list[ChatMessage],
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[str]:
         # Fail loudly (so the router can fall back) when no key is configured.
         if not self.api_key:
@@ -43,10 +50,16 @@ class OpenRouterClient(ModelClient):
         }
         payload = {
             "model": model or settings.openrouter_default_model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [to_openai_wire(m) for m in messages],
             "stream": True,
             "usage": {"include": True},  # ask OpenRouter to include token usage
         }
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+        self.last_tool_calls = []
+        # Tool calls arrive as fragments keyed by index; accumulate then parse.
+        pending: dict[int, dict] = {}
         emitted = ""
         prompt_tokens = completion_tokens = 0
 
@@ -69,14 +82,42 @@ class OpenRouterClient(ModelClient):
                     # Incremental text lives in choices[0].delta.content.
                     choices = data.get("choices") or []
                     if choices:
-                        delta = choices[0].get("delta", {}).get("content")
+                        delta_obj = choices[0].get("delta", {})
+                        delta = delta_obj.get("content")
                         if delta:
                             emitted += delta
                             yield delta
+                        # Function-call deltas: `name` arrives once, `arguments`
+                        # streams in as a JSON string across many fragments.
+                        for frag in delta_obj.get("tool_calls") or []:
+                            slot = pending.setdefault(
+                                frag.get("index", 0), {"id": "", "name": "", "args": ""}
+                            )
+                            if frag.get("id"):
+                                slot["id"] = frag["id"]
+                            fn = frag.get("function") or {}
+                            if fn.get("name"):
+                                slot["name"] = fn["name"]
+                            if fn.get("arguments"):
+                                slot["args"] += fn["arguments"]
                     # A trailing event carries the final token usage.
                     if usage := data.get("usage"):
                         prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
                         completion_tokens = usage.get("completion_tokens", completion_tokens)
+
+        # Assemble the accumulated fragments into complete tool calls.
+        for i, slot in sorted(pending.items()):
+            if not slot["name"]:
+                continue
+            try:
+                args = json.loads(slot["args"] or "{}")
+            except json.JSONDecodeError:
+                args = {}  # a truncated stream shouldn't crash the run
+            self.last_tool_calls.append(ToolCall(
+                id=slot["id"] or f"call_{i}",
+                name=slot["name"],
+                arguments=args if isinstance(args, dict) else {},
+            ))
 
         # Estimate counts if the API didn't send them, then price the call.
         prompt_tokens = prompt_tokens or sum(estimate_tokens(m.content) for m in messages)
