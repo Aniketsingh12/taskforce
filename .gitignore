@@ -11,6 +11,10 @@ node_modules/
 dist/
 .vite/
 
+# Built frontend copied into the backend image by the root Dockerfile
+# (single-service deploy) — a build artifact, never source.
+backend/static/
+
 # Env / secrets
 .env
 *.local

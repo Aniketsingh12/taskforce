@@ -1,5 +1,12 @@
 // Thin REST client for the TaskForce backend.
-const BASE = "/api";
+//
+// In dev (and Docker Compose) requests go through the Vite dev-server proxy at
+// the relative path "/api" — see vite.config.js. In production the frontend
+// and backend are on different domains (e.g. Vercel + Railway), so set
+// VITE_API_URL to the backend's origin at build time; unset, BASE stays
+// relative and same-origin behaviour is unchanged.
+const API_ORIGIN = (import.meta.env.VITE_API_URL || "").replace(/\/+$/, "");
+const BASE = `${API_ORIGIN}/api`;
 
 async function req(path, opts = {}) {
   const res = await fetch(BASE + path, {

@@ -1,0 +1,27 @@
+# Applies to the root Dockerfile's build context (the whole repo — it needs
+# both frontend/ and backend/). backend/.dockerignore and frontend/.dockerignore
+# still apply separately to their own directories' COPY steps within this build.
+
+.git/
+.claude/
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+backend/.venv/
+backend/venv/
+backend/outputs/
+backend/tests/
+backend/*.db
+backend/*.db-wal
+backend/*.db-shm
+
+# Never bake local secrets into the image.
+.env
+.env.local
+**/.env
+**/.env.local

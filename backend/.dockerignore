@@ -8,3 +8,7 @@ tests/
 *.db
 *.db-wal
 *.db-shm
+# Never bake local secrets into the image — production config comes from the
+# host platform's environment variables (Railway/Render dashboard), not a file.
+.env
+.env.local

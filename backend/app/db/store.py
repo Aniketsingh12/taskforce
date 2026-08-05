@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from pathlib import Path
 
 from ..core.config import get_settings
 from .schema import Run, RunStatus, WorkflowConfig
@@ -36,6 +37,13 @@ _RUN_COLUMNS = {
 class SqliteStore:
     def __init__(self, path: str) -> None:
         self._lock = threading.Lock()
+        # Create the parent directory if it doesn't exist yet — e.g. a fresh
+        # Railway volume mounted at /data before its first write. sqlite3
+        # itself won't create missing directories and would crash on boot.
+        if path != ":memory:":
+            parent = Path(path).parent
+            if str(parent) not in ("", "."):
+                parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False: FastAPI may touch this from threadpool + loop.
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
