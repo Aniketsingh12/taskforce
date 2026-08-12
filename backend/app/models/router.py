@@ -15,6 +15,7 @@ from .fallback import resolve_fallback
 from .mock_client import MockClient
 from .ollama_client import OllamaClient
 from .openrouter_client import OpenRouterClient
+from .together_client import TogetherClient
 
 
 class ModelRouter:
@@ -34,6 +35,7 @@ class ModelRouter:
             "mock": MockClient,
             "ollama": OllamaClient,
             "openrouter": OpenRouterClient,
+            "together": TogetherClient,
         }
 
     @property

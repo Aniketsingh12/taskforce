@@ -39,6 +39,15 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     openrouter_default_model: str = "anthropic/claude-3.5-haiku"
 
+    # --- Together AI (open-source models via API) ---
+    together_api_key: str | None = None
+    together_base_url: str = "https://api.together.ai/v1"
+    # A well-established, high-capability general-purpose default. Together's
+    # catalog moves fast — /api/models queries it live (see api/models.py) so
+    # the Models page and picker always show the ACTUAL current lineup with
+    # pricing; this default is only the pre-filled fallback before that loads.
+    together_default_model: str = "meta-llama/Llama-3.3-70B-Instruct-Turbo"
+
     # --- Direct providers (optional) ---
     anthropic_api_key: str | None = None
     openai_api_key: str | None = None
