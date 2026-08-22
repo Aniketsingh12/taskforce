@@ -64,6 +64,30 @@ class Settings(BaseSettings):
     # fine locally but should be set before exposing the API publicly.
     webhook_secret: str | None = None
 
+    # --- Public-demo access control ---
+    # The deployed app is meant to be shareable: anyone with the link can browse
+    # and run workflows live. What they can't do is spend money or change data.
+    #
+    # ADMIN_TOKEN unset (the default) disables ALL gating below — local dev and
+    # the test suite behave exactly as they did before. Set it in production.
+    admin_token: str | None = None
+    # Anonymous visitors are forced onto this provider so a public demo can
+    # never bill you. The mock provider streams realistic role-aware output and
+    # even simulates tool calls, so the demo still shows the whole platform.
+    demo_provider: str = "mock"
+    demo_model: str = "mock-default"
+
+    # --- Spend circuit breaker ---
+    # Hard ceiling on cumulative run cost per UTC day, across every trigger
+    # source. Runs are refused once it's hit. None = no limit.
+    # This is the only control that bounds your maximum bill — a rate limit
+    # caps velocity, not total.
+    daily_cost_limit_usd: float | None = 1.0
+
+    # --- Rate limiting (per client IP, run-triggering endpoints only) ---
+    rate_limit_runs: int = 20
+    rate_limit_window_seconds: int = 3600
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

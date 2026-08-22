@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api import auth as auth_api
 from .api import models as models_api
 from .api import runs as runs_api
 from .api import stats as stats_api
@@ -56,6 +57,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_api.router)
 app.include_router(workflows_api.router)
 app.include_router(runs_api.router)
 app.include_router(models_api.router)

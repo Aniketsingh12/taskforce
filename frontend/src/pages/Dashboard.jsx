@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../lib/api.js";
+import { useAuth } from "../lib/auth.jsx";
 import AgentCard from "../components/AgentCard.jsx";
 import StatsBar from "../components/StatsBar.jsx";
 
@@ -14,6 +15,9 @@ export default function Dashboard() {
   const [workflows, setWorkflows] = useState([]);
   const [error, setError] = useState(null);
   const navigate = useNavigate();
+  // Mutating controls are hidden for visitors. The server enforces this too —
+  // hiding them is UX, not the security boundary.
+  const { admin, demoMode, status } = useAuth();
 
   const load = () => api.listWorkflows().then(setWorkflows).catch((e) => setError(e.message));
   useEffect(() => {
@@ -61,7 +65,7 @@ export default function Dashboard() {
             className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">
             Run →
           </button>
-          {wf.is_template ? (
+          {admin && (wf.is_template ? (
             <button onClick={() => clone(wf.id)}
               className="rounded-lg border border-edge px-3 py-2 text-sm text-gray-300 hover:bg-panel">
               Clone
@@ -77,7 +81,7 @@ export default function Dashboard() {
                 Delete
               </button>
             </>
-          )}
+          ))}
         </div>
       </div>
       <div className="grid gap-3 md:grid-cols-3">
@@ -100,11 +104,24 @@ export default function Dashboard() {
             Teams of AI agents that complete a workflow end to end.
           </p>
         </div>
-        <button onClick={() => navigate("/builder")}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">
-          + New workflow
-        </button>
+        {admin && (
+          <button onClick={() => navigate("/builder")}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90">
+            + New workflow
+          </button>
+        )}
       </div>
+
+      {/* Tell visitors what they're getting rather than letting them wonder why
+          output quality is what it is. */}
+      {demoMode && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+          <strong>Demo mode.</strong> Runs use the built-in{" "}
+          <code className="text-amber-100">{status?.demo_model || "mock"}</code> model, so
+          everything here is free and live — streaming, tool calls, parallel agents, full
+          cost tracing. Real models and editing need the admin token.
+        </div>
+      )}
 
       <StatsBar />
 

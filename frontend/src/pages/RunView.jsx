@@ -23,6 +23,7 @@ export default function RunView() {
   const [toolCalls, setToolCalls] = useState({}); // id → [{tool, arguments}] the model chose
   const [activeId, setActiveId] = useState(null); // currently streaming agent
   const [finalRun, setFinalRun] = useState(null); // the completed Run
+  const [runError, setRunError] = useState(null); // refused before it started
   const wsRef = useRef(null);                      // hold the socket to close on unmount
 
   // Load the workflow definition (so we can draw the pipeline before running)
@@ -44,6 +45,7 @@ export default function RunView() {
   function start() {
     // Reset all live state for a fresh run.
     setRunning(true);
+    setRunError(null);
     setStatuses({});
     setOutputs({});
     setTraces({});
@@ -59,6 +61,13 @@ export default function RunView() {
       onEvent: (ev) => {
         // This switch IS the live UI — each event type maps to a state update.
         switch (ev.type) {
+          case "error":
+            // The run never started — rate limit hit, daily budget exhausted,
+            // or the workflow vanished. Surface the server's reason instead of
+            // leaving the button spinning forever.
+            setRunError(ev.message || "The run could not be started.");
+            setRunning(false);
+            break;
           case "run_started":
             // Seed the agent list and mark them all queued.
             setAgents(ev.agents);
@@ -157,6 +166,12 @@ export default function RunView() {
           {running ? "Running…" : "▶ Run live"}
         </button>
       </div>
+
+      {runError && (
+        <div className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {runError}
+        </div>
+      )}
 
       {/* The pipeline graph: nodes light up as their status changes. */}
       <div className="rounded-2xl border border-edge bg-ink/40 p-5">

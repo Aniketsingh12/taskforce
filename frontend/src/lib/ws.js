@@ -24,7 +24,22 @@ export function startRunStream({ workflowId, input, onEvent, onClose }) {
   const ws = new WebSocket(wsUrl());
 
   // As soon as the socket is open, tell the backend which workflow to run.
-  ws.onopen = () => ws.send(JSON.stringify({ workflow_id: workflowId, input }));
+  // The admin token rides in this first message because a browser can't set
+  // custom headers on a WebSocket handshake. Without it the run still works —
+  // the server just forces it onto the free demo model.
+  ws.onopen = () => {
+    let token = "";
+    try {
+      token = localStorage.getItem("taskforce_admin_token") || "";
+    } catch {
+      /* storage unavailable → run in demo mode */
+    }
+    ws.send(JSON.stringify({
+      workflow_id: workflowId,
+      input,
+      ...(token ? { admin_token: token } : {}),
+    }));
+  };
 
   // Each message is one JSON event (run_started, token, agent_completed, …).
   ws.onmessage = (msg) => {

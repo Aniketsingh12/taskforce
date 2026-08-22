@@ -5,13 +5,19 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 
+from ..core.security import require_admin
 from ..db.schema import WorkflowConfig
 from ..db.store import store
 from ..orchestration.graph import compile_graph, derive_edges
 
 router = APIRouter(prefix="/api/workflows", tags=["workflows"])
+
+# Reading is public (that's the demo); anything that CHANGES stored data needs
+# the admin token, so a visitor can't create clutter or delete your workflows.
+# No-op when ADMIN_TOKEN is unset — see core/security.py.
+_admin_only = [Depends(require_admin)]
 
 
 def _apply_graph(workflow: WorkflowConfig) -> None:
@@ -39,7 +45,8 @@ def get_workflow(workflow_id: str) -> WorkflowConfig:
     return wf
 
 
-@router.post("", response_model=WorkflowConfig, status_code=201)
+@router.post("", response_model=WorkflowConfig, status_code=201,
+             dependencies=_admin_only)
 def create_workflow(workflow: WorkflowConfig) -> WorkflowConfig:
     """Create a workflow under a server-generated id.
 
@@ -72,7 +79,8 @@ def workflow_graph(workflow_id: str) -> dict:
     }
 
 
-@router.post("/{workflow_id}/clone", response_model=WorkflowConfig, status_code=201)
+@router.post("/{workflow_id}/clone", response_model=WorkflowConfig, status_code=201,
+             dependencies=_admin_only)
 def clone_workflow(workflow_id: str) -> WorkflowConfig:
     """Duplicate a workflow (e.g. a template) into a fresh editable copy."""
     src = store.get_workflow(workflow_id)
@@ -88,7 +96,7 @@ def clone_workflow(workflow_id: str) -> WorkflowConfig:
     return store.save_workflow(clone)
 
 
-@router.put("/{workflow_id}", response_model=WorkflowConfig)
+@router.put("/{workflow_id}", response_model=WorkflowConfig, dependencies=_admin_only)
 def update_workflow(workflow_id: str, workflow: WorkflowConfig) -> WorkflowConfig:
     if store.get_workflow(workflow_id) is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -97,7 +105,8 @@ def update_workflow(workflow_id: str, workflow: WorkflowConfig) -> WorkflowConfi
     return store.save_workflow(workflow)
 
 
-@router.delete("/{workflow_id}", status_code=204, response_class=Response)
+@router.delete("/{workflow_id}", status_code=204, response_class=Response,
+               dependencies=_admin_only)
 def delete_workflow(workflow_id: str) -> Response:
     if not store.delete_workflow(workflow_id):
         raise HTTPException(status_code=404, detail="Workflow not found")

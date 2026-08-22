@@ -199,6 +199,21 @@ class SqliteStore:
                 ).fetchall()
         return [Run.model_validate_json(r[0]) for r in rows]
 
+    def spend_since(self, iso_timestamp: str) -> float:
+        """Total cost of runs started at or after `iso_timestamp`.
+
+        Powers the daily spend circuit breaker. `started_at` is stored as an
+        ISO-8601 UTC string, which sorts lexicographically in the same order as
+        chronologically — so a plain string comparison is a correct (and
+        index-backed) time filter here.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(SUM(total_cost), 0) FROM runs WHERE started_at >= ?",
+                (iso_timestamp,),
+            ).fetchone()
+        return float(row[0] or 0.0)
+
     def count_runs(self, workflow_id: str | None = None) -> int:
         with self._lock:
             if workflow_id:

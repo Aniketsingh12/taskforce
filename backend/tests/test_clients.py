@@ -12,6 +12,7 @@ import pytest
 from app.models.base import ChatMessage
 from app.models.ollama_client import OllamaClient
 from app.models.openrouter_client import OpenRouterClient
+from app.models.together_client import TogetherClient
 
 
 async def _drain(receive):
@@ -78,4 +79,62 @@ async def test_openrouter_requires_key():
     client = OpenRouterClient(api_key=None)
     with pytest.raises(RuntimeError):
         async for _ in client.stream_chat("openai/gpt-4o-mini", [ChatMessage("user", "hi")]):
+            pass
+
+
+async def together_upstream(scope, receive, send):
+    """Together's SSE stream, incl. a tool call split across fragments."""
+    await _drain(receive)
+    await send({"type": "http.response.start", "status": 200,
+                "headers": [(b"content-type", b"text/event-stream")]})
+    events = [
+        'data: {"choices":[{"delta":{"content":"Reading "}}]}\n\n',
+        'data: {"choices":[{"delta":{"content":"docs"}}]}\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_t1",'
+        '"function":{"name":"web_search","arguments":"{\\"que"}}]}}]}\n\n',
+        'data: {"choices":[{"delta":{"tool_calls":[{"index":0,'
+        '"function":{"arguments":"ry\\": \\"llama\\"}"}}]}}]}\n\n',
+        'data: {"choices":[],"usage":{"prompt_tokens":30,"completion_tokens":4}}\n\n',
+        "data: [DONE]\n\n",
+    ]
+    for i, e in enumerate(events):
+        await send({"type": "http.response.body", "body": e.encode(),
+                    "more_body": i < len(events) - 1})
+
+
+@pytest.mark.asyncio
+async def test_together_client_streams_and_reports_usage():
+    client = TogetherClient(api_key="test-key",
+                            transport=httpx.ASGITransport(app=together_upstream))
+    out = [c async for c in client.stream_chat(
+        "meta-llama/Llama-3.3-70B-Instruct-Turbo", [ChatMessage("user", "hi")]
+    )]
+    assert "".join(out) == "Reading docs"
+    # Usage comes from the API's own trailing chunk, not an estimate.
+    assert client.last_usage.prompt_tokens == 30
+    assert client.last_usage.completion_tokens == 4
+
+
+@pytest.mark.asyncio
+async def test_together_reassembles_streamed_tool_calls():
+    """Tool-call arguments stream as partial JSON and must be stitched back."""
+    client = TogetherClient(api_key="test-key",
+                            transport=httpx.ASGITransport(app=together_upstream))
+    async for _ in client.stream_chat("any-model", [ChatMessage("user", "hi")],
+                                      tools=[{"type": "function",
+                                              "function": {"name": "web_search"}}]):
+        pass
+    assert len(client.last_tool_calls) == 1
+    call = client.last_tool_calls[0]
+    assert call.id == "call_t1"
+    assert call.name == "web_search"
+    assert call.arguments == {"query": "llama"}  # rebuilt from two fragments
+
+
+@pytest.mark.asyncio
+async def test_together_requires_key():
+    """No key must raise so the router can fall back, not fail the whole run."""
+    client = TogetherClient(api_key=None)
+    with pytest.raises(RuntimeError, match="TOGETHER_API_KEY"):
+        async for _ in client.stream_chat("any-model", [ChatMessage("user", "hi")]):
             pass

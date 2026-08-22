@@ -1,4 +1,6 @@
 import { Link, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { AuthProvider } from "./lib/auth.jsx";
+import AccessBadge from "./components/AccessBadge.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import RunView from "./pages/RunView.jsx";
 import RunHistory from "./pages/RunHistory.jsx";
@@ -22,6 +24,14 @@ function NavLink({ to, children }) {
 
 export default function App() {
   return (
+    <AuthProvider>
+      <AppShell />
+    </AuthProvider>
+  );
+}
+
+function AppShell() {
+  return (
     <div className="mx-auto flex min-h-full max-w-6xl flex-col px-5">
       <header className="flex items-center justify-between border-b border-edge py-4">
         <Link to="/" className="flex items-center gap-2">
@@ -34,6 +44,9 @@ export default function App() {
           <NavLink to="/builder">Builder</NavLink>
           <NavLink to="/models">Models</NavLink>
           <NavLink to="/history">Run History</NavLink>
+          <div className="ml-2 border-l border-edge pl-2">
+            <AccessBadge />
+          </div>
         </nav>
       </header>
 

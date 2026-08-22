@@ -7,7 +7,9 @@ export default function ModelPicker({ value, onChange }) {
   const [models, setModels] = useState(null);
 
   useEffect(() => {
-    api.models().then(setModels).catch(() => setModels({ local: [], hosted: [], demo: [] }));
+    api.models()
+      .then(setModels)
+      .catch(() => setModels({ local: [], hosted: [], together: [], demo: [] }));
   }, []);
 
   const current = `${value.provider}:${value.model}`;
@@ -40,6 +42,7 @@ export default function ModelPicker({ value, onChange }) {
         <>
           {group("Demo", models.demo, true)}
           {group("Local (Ollama)", models.local, true)}
+          {group("Together AI", models.together, false)}
           {group("Hosted (OpenRouter)", models.hosted, false)}
         </>
       )}

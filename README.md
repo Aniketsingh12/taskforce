@@ -117,10 +117,31 @@ The node/edge stage model mirrors a LangGraph `StateGraph`, so LangGraph can be 
 | `POST` | `/api/webhooks/{workflow_id}` | External trigger — body becomes the run input |
 | `GET`  | `/api/models` · `/api/tools` | Available models (with pricing) · tools |
 | `GET`  | `/api/stats` | Aggregate observability for the dashboard |
+| `GET`  | `/api/auth/status` | Current access mode (admin vs. demo) |
 
 Interactive docs at `/docs`. **Live event stream:** `run_started` → `agent_started` → `token`×N → `agent_completed` / `agent_skipped` → … → `run_completed` | `run_failed`.
 
 Scheduled workflows (`trigger_type: "schedule"` + a cron `schedule`) fire automatically via the in-process scheduler.
+
+---
+
+## 🔐 Public-demo access control
+
+A deployed instance is publicly reachable, so it ships with three layers that let you **share the link safely**. All of them are **off when `ADMIN_TOKEN` is unset**, so local dev is unchanged.
+
+| Layer | Env var | Controls |
+|---|---|---|
+| Admin token | `ADMIN_TOKEN` | who can mutate data and use billed models |
+| Spend cap | `DAILY_COST_LIMIT_USD` | **your maximum bill** — the real backstop |
+| Rate limit | `RATE_LIMIT_RUNS` | how fast one IP can trigger runs |
+
+With a token set, an anonymous visitor can still **browse and run every workflow live** — but their runs are forced onto the free `mock` provider, and create/edit/clone/delete all return `401`. They still see token streaming, tool calling, parallel stages and the full cost trace, so the demo stays compelling at exactly $0. You unlock real models and editing with the token via the header (`X-Admin-Token`) or the lock button in the app header.
+
+Only the spend cap genuinely bounds cost: a rate limit caps one client's velocity, not total spend, and per-IP counting is defeated by a proxy. Set a provider-side limit in your model vendor's dashboard too — that's the only cap that survives a bug in this code.
+
+```bash
+ADMIN_TOKEN=$(openssl rand -hex 24)   # then set it in your host's env vars
+```
 
 ---
 

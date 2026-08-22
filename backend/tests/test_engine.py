@@ -63,6 +63,10 @@ def test_per_agent_fallback_overrides_the_global_chain():
     assert asyncio.run(go("mock:my-backup")) == "mock:my-backup (fallback)"
     # ...and without one, the global chain (settings) still applies.
     assert asyncio.run(go(None)) == "mock:mock-default (fallback)"
+    # A fallback naming a provider with no API key configured is ignored rather
+    # than obeyed — routing there would fail the run a second time, when the
+    # global chain still completes it.
+    assert asyncio.run(go("openrouter:openai/gpt-4o")) == "mock:mock-default (fallback)"
 
 
 def test_parallel_streams_get_isolated_usage():

@@ -11,7 +11,7 @@ from typing import AsyncIterator
 
 from ..core.config import settings
 from .base import ChatMessage, ModelClient, StreamResult
-from .fallback import resolve_fallback
+from .fallback import provider_is_usable, resolve_fallback
 from .mock_client import MockClient
 from .ollama_client import OllamaClient
 from .openrouter_client import OpenRouterClient
@@ -62,7 +62,11 @@ class ModelRouter:
             fb_provider, _, fb_model = fallback.partition(":")
             if not fb_model:  # bare model name → same provider
                 fb_provider, fb_model = provider, fb_provider
-            if fb_provider in self._factories:
+            # Only honour the override if that provider can actually serve the
+            # call. Routing to a hosted provider with no key configured would
+            # fail the run outright, when falling through to the global chain
+            # (ultimately `mock`) still completes it and records the fallback.
+            if fb_provider in self._factories and provider_is_usable(fb_provider):
                 return fb_provider, fb_model
         return resolve_fallback(provider)
 
