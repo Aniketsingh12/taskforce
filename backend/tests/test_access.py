@@ -130,6 +130,41 @@ def test_anonymous_runs_are_forced_onto_the_demo_model(gated):
     assert wf.agents[0].fallback_model == "openrouter:gpt-4o"
 
 
+# --- Model catalog privacy -------------------------------------------------
+
+def test_model_catalog_is_hidden_from_visitors(client, gated):
+    """The catalog is account detail, not public data.
+
+    Together's list is fetched with YOUR api key (so a fine-tuned or dedicated
+    model would be named in it), and the local list reveals what's installed on
+    your server. A visitor is forced onto the demo model anyway, so there's
+    nothing for them to gain and something for you to lose.
+    """
+    anon = client.get("/api/models").json()
+    assert anon["restricted"] is True
+    assert anon["together"] == []
+    assert anon["local"] == []
+    assert anon["hosted"] == []
+    # They still see the one model they're allowed to run.
+    assert [m["model"] for m in anon["demo"]] == [settings.demo_model]
+    # And no hint of which providers are wired up.
+    assert anon["providers"] == [settings.demo_provider]
+
+
+def test_admin_still_sees_the_full_catalog(client, gated):
+    full = client.get("/api/models", headers=_auth()).json()
+    assert full["restricted"] is False
+    assert "together" in full["providers"] and "openrouter" in full["providers"]
+    # Static reference pricing is compiled into the repo, so it's always present.
+    assert len(full["hosted"]) > 0
+
+
+def test_catalog_is_public_when_gating_is_off(client):
+    """Local dev keeps the full picker without needing a token."""
+    assert settings.admin_token is None
+    assert client.get("/api/models").json()["restricted"] is False
+
+
 # --- Spend circuit breaker -------------------------------------------------
 
 def test_budget_cap_blocks_new_runs_once_reached(client, gated):

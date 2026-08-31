@@ -63,6 +63,16 @@ export default function Models() {
         </p>
       </div>
       {!models && <p className="text-sm text-gray-400">Loading…</p>}
+
+      {/* The full catalog is account/infrastructure detail — the Together list
+          is fetched with the owner's API key and the local list reflects their
+          server. Visitors see only what they can actually run. */}
+      {models?.restricted && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-200">
+          <strong>Demo mode.</strong> Runs use the free built-in model below. The full
+          local + hosted model catalog is visible to the workspace owner.
+        </div>
+      )}
       {models && (
         <>
           <ModelTable title="Demo (built-in)" rows={models.demo} free

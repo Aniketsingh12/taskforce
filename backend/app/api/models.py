@@ -2,15 +2,29 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 
 from ..core.config import settings
+from ..core.security import is_admin
 from ..models import get_router
 from ..models.base import PRICE_TABLE
 from ..tools import list_tools
 
 router = APIRouter(prefix="/api", tags=["models"])
+
+# Together's catalog is fetched with YOUR API key, and the Ollama list reflects
+# what's installed on YOUR server — both are account/infrastructure detail, so
+# neither is served to anonymous visitors (who are forced onto the demo model
+# and couldn't select them anyway).
+#
+# Cached briefly so a page refresh — or someone hammering this endpoint —
+# doesn't turn into a burst of authenticated calls against your provider
+# account. Listing models is free, but it still consumes rate limit.
+_CATALOG_TTL_SECONDS = 300
+_together_cache: tuple[float, list[str], bool] | None = None
 
 # Shown when Ollama isn't reachable, so the picker still suggests sensible
 # 8GB-friendly models to pull.
@@ -49,8 +63,17 @@ async def _together_models() -> tuple[list[str], bool]:
     Falls back to a single suggested id (flagged as not live) when no key is
     configured yet, or the request fails for any reason.
     """
+    global _together_cache
+
     if not settings.together_api_key:
         return _SUGGESTED_TOGETHER, False
+
+    # Serve a recent result rather than re-querying on every page load.
+    if _together_cache is not None:
+        fetched_at, names, live = _together_cache
+        if time.monotonic() - fetched_at < _CATALOG_TTL_SECONDS:
+            return names, live
+
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             resp = await client.get(
@@ -73,23 +96,47 @@ async def _together_models() -> tuple[list[str], bool]:
                 and e.get("type") in (None, "chat", "language")
             ]
         if names:
+            _together_cache = (time.monotonic(), sorted(names), True)
             return sorted(names), True
     except Exception:  # noqa: BLE001 - bad key / network issue / API shape surprise
         pass
+    # Cache the failure too, so a bad key or an outage doesn't mean a fresh
+    # failing request on every single page load.
+    _together_cache = (time.monotonic(), _SUGGESTED_TOGETHER, False)
     return _SUGGESTED_TOGETHER, False
 
 
 @router.get("/models")
-async def available_models() -> dict:
+async def available_models(x_admin_token: str | None = Header(default=None)) -> dict:
     """Models grouped by provider, with cost-per-1M-token where known.
 
-    Local (Ollama) models are free and read live from the Ollama server;
-    hosted models show estimated pricing.
+    **Admin-scoped.** The Together catalog is queried with your API key and the
+    local list reflects what's installed on your server — both are account and
+    infrastructure detail, so an anonymous visitor is shown only the demo model
+    they're actually allowed to run. Nothing is hidden from you.
     """
+    demo_entry = {
+        "provider": settings.demo_provider, "model": settings.demo_model,
+        "is_local": True, "cost_in": 0.0, "cost_out": 0.0,
+    }
+
+    if not is_admin(x_admin_token):
+        return {
+            "providers": [settings.demo_provider],
+            "restricted": True,  # the UI explains why the list is short
+            "ollama_live": False,
+            "together_live": False,
+            "local": [],
+            "hosted": [],
+            "together": [],
+            "demo": [demo_entry],
+        }
+
     local_names, ollama_live = await _ollama_models()
     together_names, together_live = await _together_models()
     return {
         "providers": get_router().providers,
+        "restricted": False,
         "ollama_live": ollama_live,  # False → the local list is a suggestion
         "together_live": together_live,  # False → no key set, list is a suggestion
         "local": [
@@ -98,6 +145,8 @@ async def available_models() -> dict:
             for name in local_names
         ],
         "hosted": [
+            # Static reference pricing from PRICE_TABLE — public data compiled
+            # into the repo, not derived from your account.
             {"provider": "openrouter", "model": m, "is_local": False,
              "cost_in": price[0], "cost_out": price[1]}
             for m, price in PRICE_TABLE.items() if m != "mock-default"
@@ -110,9 +159,7 @@ async def available_models() -> dict:
              "cost_in": 0.0, "cost_out": 0.0}
             for name in together_names
         ],
-        "demo": [
-            {"provider": "mock", "model": "mock-default", "is_local": True, "cost_in": 0.0, "cost_out": 0.0},
-        ],
+        "demo": [demo_entry],
     }
 
 
