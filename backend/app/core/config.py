@@ -6,13 +6,22 @@ external services — the demo falls back to the built-in `mock` model provider.
 """
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# config.py -> core -> app -> backend -> repo root
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Absolute paths, because a bare ".env" resolves against the CURRENT
+        # WORKING DIRECTORY — and uvicorn runs from backend/, where no .env
+        # exists. That silently ignored the repo-root .env during local dev
+        # (Docker and Railway were unaffected: both inject real env vars).
+        # Later entries win, so a backend/.env can override the shared root one.
+        env_file=(_REPO_ROOT / ".env", _REPO_ROOT / "backend" / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
